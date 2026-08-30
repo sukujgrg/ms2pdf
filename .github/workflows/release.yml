@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            cgo: "1"
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+            cgo: "1"
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cgo: "1"
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            cgo: "1"
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: "0"
+    env:
+      CGO_ENABLED: ${{ matrix.cgo }}
+      CGO_CFLAGS: "-O2 -g0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install libsecret
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev
+
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p dist
+          ext=""
+          if [ "${{ matrix.goos }}" = windows ]; then
+            ext=".exe"
+          fi
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "dist/ms2pdf${ext}" ./cmd/ms2pdf
+          if [ "${{ matrix.goos }}" = darwin ]; then
+            strip -x "dist/ms2pdf${ext}"
+          elif [ "${{ matrix.goos }}" = linux ]; then
+            strip -s "dist/ms2pdf${ext}"
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          name="ms2pdf_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = windows ]; then
+            python -c "import zipfile; z=zipfile.ZipFile('${name}.zip','w',zipfile.ZIP_DEFLATED); z.write('dist/ms2pdf.exe','ms2pdf.exe')"
+          else
+            tar -C dist -czf "${name}.tar.gz" ms2pdf
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ms2pdf_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums and installer
+        run: |
+          cd artifacts
+          sha256sum ms2pdf_* > SHA256SUMS
+          cp ../install.sh .
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "ms2pdf ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            artifacts/*
