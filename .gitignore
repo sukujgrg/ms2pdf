@@ -1,0 +1,7 @@
+/ms2pdf
+/ms2pdf.exe
+/bin/
+*.pdf
+.env
+.DS_Store
+
