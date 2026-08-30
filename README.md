@@ -27,7 +27,19 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Set `MS2PDF_INSTALL_DIR` to install somewhere else. Linux needs `libsecret` at runtime (`libsecret-1-0` on Debian/Ubuntu).
 
-Windows: download the `windows_amd64` zip from [Releases](https://github.com/sukujgrg/ms2pdf/releases/latest) and put `ms2pdf.exe` on your `PATH`.
+Windows (PowerShell; installs to `%LOCALAPPDATA%\ms2pdf`):
+
+```
+irm https://github.com/sukujgrg/ms2pdf/releases/latest/download/install.ps1 | iex
+```
+
+A specific version:
+
+```
+$env:MS2PDF_VERSION='v0.1.1'; irm https://github.com/sukujgrg/ms2pdf/releases/latest/download/install.ps1 | iex
+```
+
+Set `MS2PDF_INSTALL_DIR` to install somewhere else.
 
 Tagged releases (`v0.1.0`, `v0.1.1`, …) build binaries on GitHub Actions. Pushing a tag matching `v*` publishes the GitHub Release.
 

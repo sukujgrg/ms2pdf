@@ -20,10 +20,6 @@ jobs:
             goos: darwin
             goarch: arm64
             cgo: "1"
-          - os: macos-13
-            goos: darwin
-            goarch: amd64
-            cgo: "1"
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
@@ -41,10 +37,10 @@ jobs:
       CGO_CFLAGS: "-O2 -g0"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -82,7 +78,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: ms2pdf_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
@@ -92,10 +88,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -104,7 +100,7 @@ jobs:
         run: |
           cd artifacts
           sha256sum ms2pdf_* > SHA256SUMS
-          cp ../install.sh .
+          cp ../install.sh ../install.ps1 .
 
       - name: Create GitHub Release
         env:
