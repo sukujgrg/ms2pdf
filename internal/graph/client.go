@@ -11,9 +11,10 @@ import (
 const defaultBase = "https://graph.microsoft.com/v1.0"
 
 type Client struct {
-	HTTP    *http.Client
-	BaseURL string
-	Token   string
+	HTTP     *http.Client
+	BaseURL  string
+	Token    string
+	Progress io.Writer
 }
 
 func New(token string) *Client {
@@ -52,6 +53,25 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+type APIError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return "graph error"
+	}
+	if e.Code != "" && e.Message != "" {
+		return fmt.Sprintf("graph %s: %s (%s)", http.StatusText(e.Status), e.Message, e.Code)
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("graph %s: %s", http.StatusText(e.Status), e.Message)
+	}
+	return fmt.Sprintf("graph %s", http.StatusText(e.Status))
+}
+
 type graphError struct {
 	Error struct {
 		Code       string `json:"code"`
@@ -64,17 +84,20 @@ type graphError struct {
 
 func readAPIError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	api := &APIError{Status: resp.StatusCode}
 	var ge graphError
-	if json.Unmarshal(body, &ge) == nil && ge.Error.Message != "" {
-		inner := ge.Error.InnerError.Code
-		if inner != "" {
-			return fmt.Errorf("graph %s: %s (%s/%s)", resp.Status, ge.Error.Message, ge.Error.Code, inner)
+	if json.Unmarshal(body, &ge) == nil && (ge.Error.Message != "" || ge.Error.Code != "") {
+		api.Code = ge.Error.Code
+		if ge.Error.InnerError.Code != "" {
+			api.Code = ge.Error.Code + "/" + ge.Error.InnerError.Code
 		}
-		return fmt.Errorf("graph %s: %s (%s)", resp.Status, ge.Error.Message, ge.Error.Code)
+		api.Message = ge.Error.Message
+		return api
 	}
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {
 		msg = resp.Status
 	}
-	return fmt.Errorf("graph %s: %s", resp.Status, msg)
+	api.Message = msg
+	return api
 }

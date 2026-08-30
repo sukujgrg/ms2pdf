@@ -2,13 +2,10 @@ package auth
 
 import (
 	"context"
-	"errors"
-	"os"
 	"sync"
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 	"github.com/sukujgrg/go-secretstore"
-	"github.com/sukujgrg/ms2pdf/internal/config"
 )
 
 var msalCacheKey = secretstore.Key{
@@ -52,15 +49,9 @@ func (c *secretCache) Export(ctx context.Context, cache cache.Marshaler, _ cache
 	}
 	defer clear(data)
 	if len(data) == 0 {
-		if err := c.delete(ctx); err != nil {
-			return err
-		}
-		return removeLegacyCacheFile()
+		return c.delete(ctx)
 	}
-	if err := c.store.Set(ctx, msalCacheKey, data); err != nil {
-		return err
-	}
-	return removeLegacyCacheFile()
+	return c.store.Set(ctx, msalCacheKey, data)
 }
 
 func (c *secretCache) get(ctx context.Context) ([]byte, error) {
@@ -69,18 +60,10 @@ func (c *secretCache) get(ctx context.Context) ([]byte, error) {
 		defer secret.Close()
 		return secret.Bytes()
 	}
-	if secretstore.CodeOf(err) != secretstore.NotFound {
-		return nil, err
+	if secretstore.CodeOf(err) == secretstore.NotFound {
+		return nil, nil
 	}
-	data, err := readLegacyCacheFile()
-	if err != nil || len(data) == 0 {
-		return data, err
-	}
-	if err := c.store.Set(ctx, msalCacheKey, data); err != nil {
-		return data, nil
-	}
-	_ = removeLegacyCacheFile()
-	return data, nil
+	return nil, err
 }
 
 func (c *secretCache) delete(ctx context.Context) error {
@@ -89,39 +72,4 @@ func (c *secretCache) delete(ctx context.Context) error {
 		return err
 	}
 	return nil
-}
-
-func readLegacyCacheFile() ([]byte, error) {
-	p := legacyCachePath()
-	if p == "" {
-		return nil, nil
-	}
-	data, err := os.ReadFile(p)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-func legacyCachePath() string {
-	p, err := config.CachePath()
-	if err != nil {
-		return ""
-	}
-	return p
-}
-
-func removeLegacyCacheFile() error {
-	p := legacyCachePath()
-	if p == "" {
-		return nil
-	}
-	err := os.Remove(p)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
 }

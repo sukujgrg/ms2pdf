@@ -19,13 +19,15 @@ var (
 )
 
 type Session struct {
-	client public.Client
-	tenant string
+	client        public.Client
+	tenant        string
+	homeAccountID string
 }
 
 type Account struct {
-	Username string
-	Name     string
+	HomeAccountID string
+	Username      string
+	Name          string
 }
 
 func Authority(tenant string) (string, error) {
@@ -45,7 +47,7 @@ func DeviceCodeTenantOK(tenant string) bool {
 	return t != "" && t != "common" && t != "consumers" && t != "organizations" && !strings.Contains(t, "://")
 }
 
-func Open(ctx context.Context, clientID, tenant string) (*Session, error) {
+func Open(ctx context.Context, clientID, tenant, homeAccountID string) (*Session, error) {
 	if strings.TrimSpace(tenant) == "" {
 		tenant = "common"
 	}
@@ -64,7 +66,7 @@ func Open(ctx context.Context, clientID, tenant string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Session{client: client, tenant: tenant}, nil
+	return &Session{client: client, tenant: tenant, homeAccountID: strings.TrimSpace(homeAccountID)}, nil
 }
 
 func (s *Session) Login(ctx context.Context, out io.Writer) (Account, error) {
@@ -74,6 +76,9 @@ func (s *Session) Login(ctx context.Context, out io.Writer) (Account, error) {
 	result, err := s.client.AcquireTokenInteractive(ctx, scopes, public.WithRedirectURI("http://localhost"))
 	if err != nil {
 		return Account{}, fmt.Errorf("browser login: %w", wrapLoginErr(err))
+	}
+	if err := s.keepOnly(ctx, result.Account); err != nil {
+		return Account{}, err
 	}
 	return accountFrom(result.Account), nil
 }
@@ -94,18 +99,18 @@ func (s *Session) LoginDeviceCode(ctx context.Context, out io.Writer) (Account, 
 	if err != nil {
 		return Account{}, fmt.Errorf("complete device code: %w", wrapTenantErr(err))
 	}
+	if err := s.keepOnly(ctx, result.Account); err != nil {
+		return Account{}, err
+	}
 	return accountFrom(result.Account), nil
 }
 
 func (s *Session) SilentToken(ctx context.Context) (string, error) {
-	accounts, err := s.client.Accounts(ctx)
+	acct, err := s.activeAccount(ctx)
 	if err != nil {
 		return "", err
 	}
-	if len(accounts) == 0 {
-		return "", ErrNotLoggedIn
-	}
-	opts := []public.AcquireSilentOption{public.WithSilentAccount(accounts[0])}
+	opts := []public.AcquireSilentOption{public.WithSilentAccount(acct)}
 	if s.tenantID() != "" {
 		opts = append(opts, public.WithTenantID(s.tenantID()))
 	}
@@ -146,14 +151,47 @@ func (s *Session) tenantID() string {
 }
 
 func (s *Session) WhoAmI(ctx context.Context) (Account, error) {
-	accounts, err := s.client.Accounts(ctx)
+	acct, err := s.activeAccount(ctx)
 	if err != nil {
 		return Account{}, err
 	}
-	if len(accounts) == 0 {
-		return Account{}, ErrNotLoggedIn
+	return accountFrom(acct), nil
+}
+
+func (s *Session) activeAccount(ctx context.Context) (public.Account, error) {
+	accounts, err := s.client.Accounts(ctx)
+	if err != nil {
+		return public.Account{}, err
 	}
-	return accountFrom(accounts[0]), nil
+	return accountByHomeID(accounts, s.homeAccountID)
+}
+
+func accountByHomeID(accounts []public.Account, homeID string) (public.Account, error) {
+	if homeID == "" || len(accounts) == 0 {
+		return public.Account{}, ErrNotLoggedIn
+	}
+	for _, a := range accounts {
+		if a.HomeAccountID == homeID {
+			return a, nil
+		}
+	}
+	return public.Account{}, ErrNotLoggedIn
+}
+
+func (s *Session) keepOnly(ctx context.Context, keep public.Account) error {
+	accounts, err := s.client.Accounts(ctx)
+	if err != nil {
+		return err
+	}
+	for _, a := range accounts {
+		if a.HomeAccountID == keep.HomeAccountID {
+			continue
+		}
+		if err := s.client.RemoveAccount(ctx, a); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Session) Logout(ctx context.Context) error {
@@ -174,5 +212,5 @@ func accountFrom(a public.Account) Account {
 	if name == "" {
 		name = a.PreferredUsername
 	}
-	return Account{Username: a.PreferredUsername, Name: name}
+	return Account{HomeAccountID: a.HomeAccountID, Username: a.PreferredUsername, Name: name}
 }

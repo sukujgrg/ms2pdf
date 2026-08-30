@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
-	"github.com/urfave/cli/v3"
 	"github.com/sukujgrg/ms2pdf/internal/auth"
 	"github.com/sukujgrg/ms2pdf/internal/config"
 	"github.com/sukujgrg/ms2pdf/internal/filetype"
 	"github.com/sukujgrg/ms2pdf/internal/graph"
+	"github.com/urfave/cli/v3"
 )
 
 func New() *cli.Command {
@@ -48,7 +49,7 @@ func New() *cli.Command {
 			},
 			{
 				Name:      "convert",
-				Usage:     "Upload one file, convert it to PDF, then delete the temp OneDrive item",
+				Usage:     "Upload one file, convert it to PDF, then permanently delete the temp OneDrive item",
 				ArgsUsage: "<file>",
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Usage: "output PDF path"},
@@ -65,7 +66,7 @@ func loginAction(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	sess, err := auth.Open(ctx, id, tenant)
+	sess, err := auth.Open(ctx, id, tenant, "")
 	if err != nil {
 		return err
 	}
@@ -78,7 +79,7 @@ func loginAction(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if err := persistLogin(id, tenant); err != nil {
+	if err := persistLogin(id, tenant, acct.HomeAccountID); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(cmd.Root().Writer, "logged in as %s\n", acct.Username)
@@ -91,6 +92,9 @@ func logoutAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	if err := sess.Logout(ctx); err != nil {
+		return err
+	}
+	if err := clearHomeAccount(); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(cmd.Root().Writer, "logged out")
@@ -127,6 +131,7 @@ func convertAction(ctx context.Context, cmd *cli.Command) error {
 	if output == "" {
 		output = filetype.DefaultOutput(input)
 	}
+	graph.Status(os.Stderr, "getting token…")
 	sess, err := openSession(ctx, cmd)
 	if err != nil {
 		return err
@@ -135,7 +140,9 @@ func convertAction(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return notLoggedIn(err)
 	}
-	if err := graph.New(token).ConvertFile(ctx, input, output, ext); err != nil {
+	client := graph.New(token)
+	client.Progress = os.Stderr
+	if err := client.ConvertFile(ctx, input, output, ext); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(cmd.Root().Writer, output)
@@ -147,7 +154,11 @@ func openSession(ctx context.Context, cmd *cli.Command) (*auth.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return auth.Open(ctx, id, tenant)
+	f, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return auth.Open(ctx, id, tenant, f.HomeAccountID)
 }
 
 func resolveIDs(cmd *cli.Command) (string, string, error) {
@@ -162,13 +173,23 @@ func resolveIDs(cmd *cli.Command) (string, string, error) {
 	return id, tenant, nil
 }
 
-func persistLogin(id, tenant string) error {
+func persistLogin(id, tenant, homeAccountID string) error {
 	f, err := config.Load()
 	if err != nil {
 		return err
 	}
 	f.ClientID = id
 	f.TenantID = tenant
+	f.HomeAccountID = homeAccountID
+	return config.Save(f)
+}
+
+func clearHomeAccount() error {
+	f, err := config.Load()
+	if err != nil {
+		return err
+	}
+	f.HomeAccountID = ""
 	return config.Save(f)
 }
 

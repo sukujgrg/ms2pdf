@@ -10,8 +10,9 @@ import (
 const dirName = "ms2pdf"
 
 type File struct {
-	ClientID string `json:"client_id,omitempty"`
-	TenantID string `json:"tenant_id,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	TenantID      string `json:"tenant_id,omitempty"`
+	HomeAccountID string `json:"home_account_id,omitempty"`
 }
 
 func dirPath() (string, error) {
@@ -39,14 +40,6 @@ func Path() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "config.json"), nil
-}
-
-func CachePath() (string, error) {
-	dir, err := Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "msal.json"), nil
 }
 
 func Load() (File, error) {

@@ -7,6 +7,33 @@ Local CLI that converts one Office (or other Graph-supported) file to PDF using 
 
 - Docs: [pkg.go.dev/github.com/sukujgrg/ms2pdf](https://pkg.go.dev/github.com/sukujgrg/ms2pdf)
 - CI: [github.com/sukujgrg/ms2pdf/actions](https://github.com/sukujgrg/ms2pdf/actions/workflows/ci.yml)
+- Releases: [github.com/sukujgrg/ms2pdf/releases](https://github.com/sukujgrg/ms2pdf/releases)
+
+## Install
+
+macOS and Linux (detects OS and CPU, installs to `~/.local/bin`):
+
+```
+curl -fsSL https://github.com/sukujgrg/ms2pdf/releases/latest/download/install.sh | sh
+```
+
+A specific version:
+
+```
+curl -fsSL https://github.com/sukujgrg/ms2pdf/releases/latest/download/install.sh | sh -s -- v0.1.0
+```
+
+If `~/.local/bin` is not on your `PATH`:
+
+```
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Set `MS2PDF_INSTALL_DIR` to install somewhere else. Linux needs `libsecret` at runtime (`libsecret-1-0` on Debian/Ubuntu).
+
+Windows: download the `windows_amd64` zip from [Releases](https://github.com/sukujgrg/ms2pdf/releases/latest) and put `ms2pdf.exe` on your `PATH`.
+
+Tagged releases (`v0.1.0`, `v0.1.1`, …) build binaries on GitHub Actions. Pushing a tag matching `v*` publishes the GitHub Release.
 
 ## Commands
 
@@ -43,26 +70,37 @@ A personal Microsoft account + OneDrive does **not** need a paid Office licence.
 ## Usage
 
 ```
+ms2pdf login --app-id <APPLICATION_CLIENT_ID>
+ms2pdf convert report.docx
+ms2pdf convert memo --type docx -o memo.pdf
+ms2pdf --version
+```
+
+To build from source:
+
+```
 make build
 ./bin/ms2pdf login --app-id <APPLICATION_CLIENT_ID>
-./bin/ms2pdf convert report.docx
-./bin/ms2pdf convert memo --type docx -o memo.pdf
 ```
 
 `--app-id` can also be `MS2PDF_CLIENT_ID`. The first successful login stores the id in the user config dir so later commands can omit it.
 
-Tokens are stored in the macOS Keychain (service `ms2pdf`, account `msal-cache`) via [go-secretstore](https://github.com/sukujgrg/go-secretstore). App id and tenant stay in `os.UserConfigDir()` as `ms2pdf/config.json`. An existing `msal.json` is copied into Keychain on first use, then removed. Files are uploaded to `me/drive` as a temporary item, converted, then deleted.
+Tokens are stored in the macOS Keychain (service `ms2pdf`, account `msal-cache`) via [go-secretstore](https://github.com/sukujgrg/go-secretstore). App id, tenant, and the signed-in account id stay in `os.UserConfigDir()` as `ms2pdf/config.json`. Files are uploaded to `me/drive` as a temporary item, converted, then permanently deleted (`permanentDelete`, with a recycle-bin fallback on personal OneDrive where that API is unsupported).
 
 ## Makefile
 
 | Target | Purpose |
 | --- | --- |
-| `make build` | CGO-enabled `bin/ms2pdf` |
+| `make build` | CGO-enabled `bin/ms2pdf` (embeds `git describe` as `--version`) |
 | `make test` | unit tests |
 | `make vet` | `go vet` |
 | `make clean` | remove `bin/` |
 
 macOS and Linux builds need CGO because token storage uses go-secretstore.
+
+On a terminal, `convert` prints upload / convert / download progress on stderr. Piped output stays quiet.
+
+Source files larger than **100 MiB** are rejected before upload. Graph’s convert API is the real limit (often lower if conversion exceeds about 45 seconds).
 
 ## Licence notes
 
