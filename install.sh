@@ -28,7 +28,7 @@ esac
 case "$os" in
 darwin | linux) ;;
 msys* | mingw* | cygwin*)
-	die "use the Windows zip from https://github.com/${REPO}/releases/latest"
+	die "on Windows use: irm https://github.com/${REPO}/releases/latest/download/install.ps1 | iex"
 	;;
 *) die "unsupported OS: $(uname -s)" ;;
 esac

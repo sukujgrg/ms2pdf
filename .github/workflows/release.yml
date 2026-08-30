@@ -100,7 +100,7 @@ jobs:
         run: |
           cd artifacts
           sha256sum ms2pdf_* > SHA256SUMS
-          cp ../install.sh .
+          cp ../install.sh ../install.ps1 .
 
       - name: Create GitHub Release
         env:
