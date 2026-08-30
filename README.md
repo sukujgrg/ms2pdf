@@ -25,7 +25,7 @@ If `~/.local/bin` is not on your `PATH`:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Set `MS2PDF_INSTALL_DIR` to install somewhere else. Linux needs `libsecret` at runtime (`libsecret-1-0` on Debian/Ubuntu).
+Set `MS2PDF_INSTALL_DIR` to install somewhere else. Linux needs `libsecret` at runtime (`libsecret-1-0` on Debian/Ubuntu). Apple Silicon only on macOS; Intel Macs should build from source.
 
 Windows (PowerShell; installs to `%LOCALAPPDATA%\ms2pdf`):
 

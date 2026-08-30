@@ -32,6 +32,9 @@ msys* | mingw* | cygwin*)
 	;;
 *) die "unsupported OS: $(uname -s)" ;;
 esac
+if [ "$os" = darwin ] && [ "$arch" = amd64 ]; then
+	die "no Intel macOS binary; use an Apple Silicon Mac or build from source"
+fi
 
 need_cmd curl
 need_cmd tar

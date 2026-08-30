@@ -11,12 +11,19 @@ import (
 	"testing"
 )
 
+func uploadedItem() map[string]any {
+	return map[string]any{
+		"id": "item1",
+		"parentReference": map[string]string{"driveId": "drive1"},
+	}
+}
+
 func TestConvertFile(t *testing.T) {
 	var deleted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/me/drive/root:") && strings.Contains(r.URL.Path, "/content"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": "item1"})
+			_ = json.NewEncoder(w).Encode(uploadedItem())
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "createUploadSession"):
 			t.Errorf("small file should not use upload session, got %s", r.URL.Path)
 			if r.Header.Get("Authorization") == "" {
@@ -29,7 +36,7 @@ func TestConvertFile(t *testing.T) {
 			if r.Header.Get("Authorization") != "" {
 				t.Error("upload URL should not receive the Graph token")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": "item1"})
+			_ = json.NewEncoder(w).Encode(uploadedItem())
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/content"):
 			if r.Header.Get("Authorization") == "" {
 				t.Error("convert GET missing bearer token")
@@ -40,8 +47,11 @@ func TestConvertFile(t *testing.T) {
 				t.Error("redirect download should not receive Authorization")
 			}
 			_, _ = w.Write([]byte("%PDF-1.4 test"))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/permanentDelete"):
+		case r.Method == http.MethodPost && r.URL.Path == "/drives/drive1/items/item1/permanentDelete":
 			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/permanentDelete"):
+			t.Errorf("expected /drives/{driveId}/items/{id}/permanentDelete, got %s", r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/items/item1"):
 			t.Error("expected permanentDelete, got ordinary DELETE")
@@ -87,7 +97,7 @@ func TestConvertCleanupFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/content"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": "item1"})
+			_ = json.NewEncoder(w).Encode(uploadedItem())
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/content"):
 			_, _ = w.Write([]byte("%PDF-1.4 test"))
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/permanentDelete"):
@@ -125,15 +135,15 @@ func TestConvertPersonalRecycleFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/content"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": "item1"})
+			_ = json.NewEncoder(w).Encode(uploadedItem())
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/content"):
 			_, _ = w.Write([]byte("%PDF-1.4 test"))
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/permanentDelete"):
+		case r.Method == http.MethodPost && r.URL.Path == "/drives/drive1/items/item1/permanentDelete":
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"error": map[string]string{"code": "invalidRequest", "message": "API not found"},
 			})
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/items/item1"):
+		case r.Method == http.MethodDelete && r.URL.Path == "/drives/drive1/items/item1":
 			recycled = true
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -157,6 +167,79 @@ func TestConvertPersonalRecycleFallback(t *testing.T) {
 	}
 	if !recycled {
 		t.Fatal("personal OneDrive should fall back to DELETE")
+	}
+}
+
+func TestConvertRequiresDriveID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/content") {
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": "item1"})
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.docx")
+	if err := os.WriteFile(in, []byte("docx-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New("tok")
+	c.BaseURL = srv.URL
+	c.HTTP = srv.Client()
+	err := c.ConvertFile(context.Background(), in, filepath.Join(dir, "out.pdf"), "docx")
+	if err == nil || !strings.Contains(err.Error(), "drive id") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestReplaceFileRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "tmp.pdf")
+	dest := filepath.Join(dir, "out")
+	if err := os.WriteFile(tmp, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := replaceFile(tmp, dest)
+	if err == nil || !strings.Contains(err.Error(), "directory") {
+		t.Fatalf("got %v", err)
+	}
+	st, err := os.Stat(dest)
+	if err != nil || !st.IsDir() {
+		t.Fatal("destination directory must remain")
+	}
+	if _, err := os.Stat(tmp); err != nil {
+		t.Fatal("temp file must remain when replace is rejected")
+	}
+}
+
+func TestReplaceFileReplacesExisting(t *testing.T) {
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "tmp.pdf")
+	dest := filepath.Join(dir, "out.pdf")
+	if err := os.WriteFile(tmp, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceFile(tmp, dest); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("got %q", got)
+	}
+	if _, err := os.Stat(dest + ".ms2pdf-old"); !os.IsNotExist(err) {
+		t.Fatalf("leftover backup: %v", err)
 	}
 }
 
