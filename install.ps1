@@ -63,7 +63,7 @@ try {
 	if (-not $userPath) { $userPath = '' }
 	$parts = $userPath -split ';' | Where-Object { $_ }
 	if ($parts -notcontains $InstallDir) {
-		[Environment]::SetEnvironmentVariable('Path', ($parts + $InstallDir) -join ';', 'User')
+		[Environment]::SetEnvironmentVariable('Path', (@($parts) + $InstallDir) -join ';', 'User')
 		$env:Path = "$env:Path;$InstallDir"
 		Write-Host "added $InstallDir to user PATH; open a new terminal if ms2pdf is not found"
 	}

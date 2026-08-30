@@ -32,8 +32,25 @@ type uploadSession struct {
 }
 
 type driveItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ParentReference struct {
+		DriveID string `json:"driveId"`
+	} `json:"parentReference"`
+}
+
+func (d driveItem) driveID() string {
+	return d.ParentReference.DriveID
+}
+
+func (d driveItem) requireIDs() error {
+	if d.ID == "" {
+		return fmt.Errorf("upload did not return an item id")
+	}
+	if d.driveID() == "" {
+		return fmt.Errorf("upload did not return a drive id")
+	}
+	return nil
 }
 
 func (c *Client) ConvertFile(ctx context.Context, input, output, ext string) (err error) {
@@ -64,7 +81,7 @@ func (c *Client) ConvertFile(ctx context.Context, input, output, ext string) (er
 		rep.line("deleting  " + remote)
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 		defer cancel()
-		if delErr := c.deleteItem(cleanupCtx, item.ID); delErr != nil {
+		if delErr := c.deleteItem(cleanupCtx, item); delErr != nil {
 			if err != nil {
 				err = fmt.Errorf("%w; also failed to delete temp OneDrive item: %v", err, delErr)
 			} else {
@@ -96,13 +113,31 @@ func (c *Client) ConvertFile(ctx context.Context, input, output, ext string) (er
 }
 
 func replaceFile(tmp, dest string) error {
-	if err := os.Rename(tmp, dest); err == nil {
-		return nil
+	st, err := os.Lstat(dest)
+	existed := err == nil
+	if err == nil && st.IsDir() {
+		return fmt.Errorf("output %s is a directory", dest)
 	}
-	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return os.Rename(tmp, dest)
+	if err := os.Rename(tmp, dest); err == nil {
+		return nil
+	} else if !existed {
+		return err
+	}
+	backup := dest + ".ms2pdf-old"
+	if err := os.Rename(dest, backup); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Rename(backup, dest)
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return fmt.Errorf("replaced %s but leftover backup %s: %w", dest, backup, err)
+	}
+	return nil
 }
 
 func oneDrivePath(name string) string {
@@ -139,8 +174,8 @@ func (c *Client) putContent(ctx context.Context, path string, body io.Reader, si
 	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
 		return driveItem{}, err
 	}
-	if item.ID == "" {
-		return driveItem{}, fmt.Errorf("upload did not return an item id")
+	if err := item.requireIDs(); err != nil {
+		return driveItem{}, err
 	}
 	return item, nil
 }
@@ -189,8 +224,8 @@ func (c *Client) putFragments(ctx context.Context, uploadURL string, r io.Reader
 			return driveItem{}, err
 		}
 		resp.Body.Close()
-		if last.ID == "" {
-			return driveItem{}, fmt.Errorf("upload did not return an item id")
+		if err := last.requireIDs(); err != nil {
+			return driveItem{}, err
 		}
 		return last, nil
 	}
@@ -221,8 +256,8 @@ func (c *Client) putFragments(ctx context.Context, uploadURL string, r io.Reader
 		resp.Body.Close()
 		rep.update(label, end, total, true)
 	}
-	if last.ID == "" {
-		return driveItem{}, fmt.Errorf("upload did not return an item id")
+	if err := last.requireIDs(); err != nil {
+		return driveItem{}, err
 	}
 	rep.finish()
 	return last, nil
@@ -247,29 +282,39 @@ func (c *Client) downloadPDF(ctx context.Context, itemID string, w io.Writer, re
 	return err
 }
 
-func (c *Client) deleteItem(ctx context.Context, itemID string) error {
-	if err := c.permanentDelete(ctx, itemID); err == nil {
+func (c *Client) deleteItem(ctx context.Context, item driveItem) error {
+	if err := item.requireIDs(); err != nil {
+		return err
+	}
+	if err := c.permanentDelete(ctx, item); err == nil {
 		return nil
 	} else if !isPermanentDeleteUnsupported(err) {
 		return err
 	}
-	if err := c.recycleDelete(ctx, itemID); err != nil {
+	if err := c.recycleDelete(ctx, item); err != nil {
 		return err
 	}
-	if err := c.permanentDelete(ctx, itemID); err == nil || isNotFound(err) {
+	if err := c.permanentDelete(ctx, item); err == nil || isNotFound(err) {
 		return nil
 	} else if !isPermanentDeleteUnsupported(err) {
 		return err
 	}
-	if err := c.recycleDelete(ctx, itemID); err != nil && !isNotFound(err) {
+	if err := c.recycleDelete(ctx, item); err != nil && !isNotFound(err) {
 		return fmt.Errorf("temp item remains in OneDrive recycle bin: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) permanentDelete(ctx context.Context, itemID string) error {
-	u := c.BaseURL + "/me/drive/items/" + itemID + "/permanentDelete"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, http.NoBody)
+func (c *Client) itemURL(item driveItem, suffix string) string {
+	u := c.BaseURL + "/drives/" + item.driveID() + "/items/" + item.ID
+	if suffix != "" {
+		u += suffix
+	}
+	return u
+}
+
+func (c *Client) permanentDelete(ctx context.Context, item driveItem) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.itemURL(item, "/permanentDelete"), http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -281,9 +326,8 @@ func (c *Client) permanentDelete(ctx context.Context, itemID string) error {
 	return nil
 }
 
-func (c *Client) recycleDelete(ctx context.Context, itemID string) error {
-	u := c.BaseURL + "/me/drive/items/" + itemID
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+func (c *Client) recycleDelete(ctx context.Context, item driveItem) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.itemURL(item, ""), nil)
 	if err != nil {
 		return err
 	}
