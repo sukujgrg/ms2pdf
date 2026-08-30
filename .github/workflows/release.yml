@@ -38,6 +38,7 @@ jobs:
             cgo: "0"
     env:
       CGO_ENABLED: ${{ matrix.cgo }}
+      CGO_CFLAGS: "-O2 -g0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,8 +62,14 @@ jobs:
           if [ "${{ matrix.goos }}" = windows ]; then
             ext=".exe"
           fi
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "dist/ms2pdf${ext}" ./cmd/ms2pdf
+          if [ "${{ matrix.goos }}" = darwin ]; then
+            strip -x "dist/ms2pdf${ext}"
+          elif [ "${{ matrix.goos }}" = linux ]; then
+            strip -s "dist/ms2pdf${ext}"
+          fi
 
       - name: Package
         shell: bash

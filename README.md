@@ -5,10 +5,6 @@
 
 Local CLI that converts one Office (or other Graph-supported) file to PDF using Microsoft Graph `GET {driveItem}/content?format=pdf`.
 
-- Docs: [pkg.go.dev/github.com/sukujgrg/ms2pdf](https://pkg.go.dev/github.com/sukujgrg/ms2pdf)
-- CI: [github.com/sukujgrg/ms2pdf/actions](https://github.com/sukujgrg/ms2pdf/actions/workflows/ci.yml)
-- Releases: [github.com/sukujgrg/ms2pdf/releases](https://github.com/sukujgrg/ms2pdf/releases)
-
 ## Install
 
 macOS and Linux (detects OS and CPU, installs to `~/.local/bin`):
@@ -91,7 +87,7 @@ Tokens are stored in the macOS Keychain (service `ms2pdf`, account `msal-cache`)
 
 | Target | Purpose |
 | --- | --- |
-| `make build` | CGO-enabled `bin/ms2pdf` (embeds `git describe` as `--version`) |
+| `make build` | stripped, trimpath `bin/ms2pdf` (embeds `git describe` as `--version`) |
 | `make test` | unit tests |
 | `make vet` | `go vet` |
 | `make clean` | remove `bin/` |
